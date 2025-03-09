@@ -1,95 +1,239 @@
-// Routes/socketRoutes.js
-const { v4: uuidV4 } = require("uuid");
 
-const rooms = new Map();
+// SocketRoutes.js
+const { v4: uuidv4 } = require('uuid');
 
-module.exports = (io) => {
-  io.on("connection", (socket) => {
-    console.log(socket.id, "connected");
+module.exports = function(io) {
+  // Store for active users and their socket connections
+  const users = {};
+  
+  // Queue for matchmaking
+  let waitingPlayers = [];
+  
+  // Active game rooms
+  const rooms = {};
 
-    socket.on("username", (username) => {
-      console.log("username:", username);
-      socket.data.username = username;
-    });
-
-    socket.on("createRoom", async (callback) => {
-      const roomId = uuidV4();
-      await socket.join(roomId);
-
-      rooms.set(roomId, {
-        roomId,
-        players: [{ id: socket.id, username: socket.data?.username }],
-      });
-
-      callback(roomId);
-    });
-
-    socket.on("joinRoom", async (args, callback) => {
-      const room = rooms.get(args.roomId);
-      let error, message;
-
-      if (!room) {
-        error = true;
-        message = "room does not exist";
-      } else if (room.length <= 0) {
-        error = true;
-        message = "room is empty";
-      } else if (room.length >= 2) {
-        error = true;
-        message = "room is full";
-      }
-
-      if (error) {
-        if (callback) {
-          callback({ error, message });
+  io.on('connection', (socket) => {
+    console.log(`Socket connected: ${socket.id}`);
+    
+    // Set username
+    socket.on('joinRoom', ({ roomId, username }, callback) => {
+        const user = users[socket.id];
+      
+        if (!user) {
+          callback({ success: false, message: 'Please set a username first' });
+          return;
         }
+      
+        if (rooms[roomId]) {
+          // Room exists, join it
+          socket.join(roomId);
+          rooms[roomId].players.push(socket.id);
+      
+          // Find opponent
+          const opponentId = rooms[roomId].players.find(id => id !== socket.id);
+          const opponent = users[opponentId] ? { id: opponentId, username: users[opponentId].username } : null;
+      
+          callback({ success: true, opponent, color: opponent ? "black" : "white" });
+      
+          console.log(`${username} joined existing room ${roomId}`);
+        } else {
+          // Room doesn't exist, create it
+          rooms[roomId] = { roomId, players: [socket.id] };
+          socket.join(roomId);
+          callback({ success: true, opponent: null, color: "white" });
+      
+          console.log(`${username} created and joined room ${roomId}`);
+        }
+      });
+      
+    socket.on('username', (username) => {
+      users[socket.id] = {
+        id: socket.id,
+        username: username,
+        inGame: false,
+        roomId: null
+      };
+      console.log(`User ${username} (${socket.id}) set their username`);
+    });
+    
+    // Find match
+    socket.on('findMatch', (callback) => {
+      const user = users[socket.id];
+      
+      if (!user) {
+        callback({ waiting: false, message: 'Please set a username first' });
         return;
       }
-
-      await socket.join(args.roomId);
-
-      const roomUpdate = {
-        ...room,
-        players: [...room.players, { id: socket.id, username: socket.data?.username }],
-      };
-
-      rooms.set(args.roomId, roomUpdate);
-
-      callback(roomUpdate);
-
-      socket.to(args.roomId).emit("opponentJoined", roomUpdate);
+      
+      if (user.inGame) {
+        callback({ waiting: false, message: 'You are already in a game' });
+        return;
+      }
+      
+      // Add to waiting queue
+      waitingPlayers.push(socket.id);
+      callback({ waiting: true, message: 'Waiting for an opponent...' });
+      
+      // Check if we can match players
+      if (waitingPlayers.length >= 2) {
+        const player1Id = waitingPlayers.shift();
+        const player2Id = waitingPlayers.shift();
+        
+        // Make sure both players are still connected
+        if (!users[player1Id] || !users[player2Id]) {
+          if (users[player1Id]) waitingPlayers.unshift(player1Id);
+          if (users[player2Id]) waitingPlayers.unshift(player2Id);
+          return;
+        }
+        
+        const player1 = users[player1Id];
+        const player2 = users[player2Id];
+        
+        // Create a new room
+        const roomId = uuidv4();
+        rooms[roomId] = {
+          roomId: roomId,
+          players: [player1Id, player2Id],
+          gameState: 'playing'
+        };
+        
+        // Update user status
+        player1.inGame = true;
+        player1.roomId = roomId;
+        player2.inGame = true;
+        player2.roomId = roomId;
+        
+        // Join socket room
+        io.sockets.sockets.get(player1Id)?.join(roomId);
+        io.sockets.sockets.get(player2Id)?.join(roomId);
+        
+        // Notify both players about the match
+        io.to(player1Id).emit('matchFound', {
+          opponent: player2,
+          roomId: roomId,
+          color: 'white'
+        });
+        
+        io.to(player2Id).emit('matchFound', {
+          opponent: player1,
+          roomId: roomId,
+          color: 'black'
+        });
+        
+        console.log(`Match created: ${player1.username} vs ${player2.username} in room ${roomId}`);
+      }
     });
-
-    socket.on("move", (data) => {
-      socket.to(data.room).emit("move", data.move);
+    
+    // Cancel matchmaking
+    socket.on('cancelMatchmaking', () => {
+      const index = waitingPlayers.indexOf(socket.id);
+      if (index !== -1) {
+        waitingPlayers.splice(index, 1);
+        console.log(`User ${users[socket.id]?.username || socket.id} canceled matchmaking`);
+      }
     });
-
-    socket.on("disconnect", () => {
-      const gameRooms = Array.from(rooms.values());
-
-      gameRooms.forEach((room) => {
-        const userInRoom = room.players.find((player) => player.id === socket.id);
-
-        if (userInRoom) {
-          if (room.players.length < 2) {
-            rooms.delete(room.roomId);
-            return;
-          }
-          socket.to(room.roomId).emit("playerDisconnected", userInRoom);
+    
+    // Leave game
+    socket.on('leaveGame', () => {
+      const user = users[socket.id];
+      if (!user || !user.inGame || !user.roomId) return;
+      
+      const roomId = user.roomId;
+      const room = rooms[roomId];
+      
+      if (room) {
+        // Notify other player
+        const otherPlayerId = room.players.find(id => id !== socket.id);
+        if (otherPlayerId && users[otherPlayerId]) {
+          io.to(otherPlayerId).emit('opponentLeft', user);
+          
+          // Update other player status
+          users[otherPlayerId].inGame = false;
+          users[otherPlayerId].roomId = null;
+        }
+        
+        // Clean up room
+        delete rooms[roomId];
+      }
+      
+      // Update user status
+      user.inGame = false;
+      user.roomId = null;
+      
+      socket.leave(roomId);
+      console.log(`User ${user.username} left game in room ${roomId}`);
+    });
+    
+    // Close room
+    socket.on('closeRoom', ({ roomId }) => {
+        console.log(rooms.players)
+      if (!roomId || !rooms[roomId]) return;
+      
+      const room = rooms[roomId];
+      
+      // Update player statuses
+      room.players.forEach(playerId => {
+        if (users[playerId]) {
+          users[playerId].inGame = false;
+          users[playerId].roomId = null;
+          io.sockets.sockets.get(playerId)?.leave(roomId);
         }
       });
+      
+      // Clean up room
+      delete rooms[roomId];
+      io.to(roomId).emit('closeRoom', { roomId });
+      
+      console.log(`Room ${roomId} closed`);
     });
-
-    socket.on("closeRoom", async (data) => {
-      socket.to(data.roomId).emit("closeRoom", data);
-
-      const clientSockets = await io.in(data.roomId).fetchSockets();
-
-      clientSockets.forEach((s) => {
-        s.leave(data.roomId);
-      });
-
-      rooms.delete(data.roomId);
+    
+    // Handle chess moves
+    socket.on('move', ({ move, room }) => {
+      console.log(rooms);
+      if (!room || !rooms[room]) {
+        console.log(`Invalid room for move: ${room}`);
+        return;
+      }
+      
+      console.log(`Broadcasting move to room ${room}: ${JSON.stringify(move)}`);
+      console.log(`Room players: ${JSON.stringify(rooms[room].players)}`);
+      socket.to(room).emit('move', { move });
+      console.log(`Move broadcast complete`);
+  });;
+    
+    // Disconnect
+    socket.on('disconnect', () => {
+      const user = users[socket.id];
+      
+      // Remove from waiting queue if present
+      const waitingIndex = waitingPlayers.indexOf(socket.id);
+      if (waitingIndex !== -1) {
+        waitingPlayers.splice(waitingIndex, 1);
+      }
+      
+      // Notify opponent if in game
+      if (user && user.inGame && user.roomId) {
+        const roomId = user.roomId;
+        const room = rooms[roomId];
+        
+        if (room) {
+          const otherPlayerId = room.players.find(id => id !== socket.id);
+          if (otherPlayerId && users[otherPlayerId]) {
+            io.to(otherPlayerId).emit('playerDisconnected', user);
+            
+            // Update other player status
+            users[otherPlayerId].inGame = false;
+            users[otherPlayerId].roomId = null;
+          }
+          
+          // Clean up room
+          delete rooms[roomId];
+        }
+      }
+      
+      // Remove user from users object
+      delete users[socket.id];
+      console.log(`Socket disconnected: ${socket.id}`);
     });
   });
 };

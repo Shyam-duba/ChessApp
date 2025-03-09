@@ -12,6 +12,7 @@ const socket = io("ws://localhost:5000", {
 function Home() {
   const navigate = useNavigate();
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [playerColor, setPlayerColor] = useState(null);
   const [isWaiting, setIsWaiting] = useState(false);
   const [roomId, setRoomId] = useState(null);
   const [error, setError] = useState(null);
@@ -33,44 +34,78 @@ function Home() {
     if (username) {
       socket.emit('username', username);
     }
+    socket.on("matchFound", (res) => {
+      const{opponent, roomId, color} = res;
+      console.log(`Match found: ${opponent} in room ${roomId}, you are playing as ${color}`);
+      setRoomId(roomId);
+      navigate(`/game/${roomId}`,{state:{opponent:opponent, color:color}});
+    });
+
+    
+    // Listen for opponent joining
+    socket.on('gameStarted', (data) => {
+      // Access the roomId and color from the data object
+      const { roomId, color } = data;
+      
+      // Now you can set the roomId in your application state
+      // For example, using React state:
+      setRoomId(roomId);
+      setPlayerColor(color);
+      
+      // Or store it in a global variable:
+      // window.roomId = roomId;
+      
+      console.log(`Game started in room: ${roomId}, you are playing as: ${color}`);
+    });
+
+    // Listen for player disconnection
+    socket.on('playerDisconnected', (player) => {
+      setError(`${player.username} disconnected`);
+      setIsWaiting(false);
+      setRoomId(null);
+    });
 
     // Clean up socket listeners on unmount
     return () => {
       socket.off('opponentJoined');
       socket.off('playerDisconnected');
-      if (roomId) {
-        socket.emit('closeRoom', { roomId });
-      }
+      socket.off('findMatchResponse');
+      
     };
-  }, [username, roomId]);
+  }, [username, roomId, navigate]);
 
   const handleLogout = () => {
-    if (roomId) {
-      socket.emit('closeRoom', { roomId });
-    }
+    
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     navigate('/login');
   };
 
   const handlePlayOnline = () => {
-    setIsWaiting(true);
-    setError(null);
-    
-    socket.emit('createRoom', (newRoomId) => {
-      setRoomId(newRoomId);
-    });
+  setIsWaiting(true);
+  setError(null);
 
-    socket.on('opponentJoined', (roomUpdate) => {
+  socket.emit('findMatch', (response) => {
+    if (response.waiting) {
+      console.log(response.message);
+    } else if (response.roomId) {
+      console.log('New room created:', response.roomId);
+      setRoomId(response.roomId);
+      navigate(`/game/${response.roomId}`);
+    } else {
+      setError(response.message);
       setIsWaiting(false);
-      navigate(`/game/${roomId}`);
-    });
+    }
+  });
+};
 
-    socket.on('playerDisconnected', (player) => {
-      setError(`${player.username} disconnected`);
-      setIsWaiting(false);
+
+  const handleCancelMatchmaking = () => {
+    if (roomId) {
+      socket.emit('closeRoom', { roomId });
       setRoomId(null);
-    });
+    }
+    setIsWaiting(false);
   };
 
   return (
@@ -149,19 +184,33 @@ function Home() {
           </p>
 
           <div className="flex flex-col md:flex-row gap-4 justify-center">
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={handlePlayOnline}
-              disabled={isWaiting}
-              className={`${
-                isWaiting 
-                  ? 'bg-gray-500 cursor-not-allowed'
-                  : 'bg-white hover:bg-gray-100'
-              } text-black px-8 py-4 rounded-lg font-semibold text-lg transition-colors`}
-            >
-              {isWaiting ? 'Waiting for opponent...' : 'Play Online'}
-            </motion.button>
+            {!isWaiting ? (
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={handlePlayOnline}
+                className="bg-white hover:bg-gray-100 text-black px-8 py-4 rounded-lg font-semibold text-lg transition-colors"
+              >
+                Play Online
+              </motion.button>
+            ) : (
+              <div className="flex gap-4">
+                <motion.div
+                  className="bg-white text-black px-8 py-4 rounded-lg font-semibold text-lg flex items-center gap-2"
+                >
+                  <div className="animate-spin h-4 w-4 border-2 border-black border-t-transparent rounded-full"></div>
+                  Waiting for opponent...
+                </motion.div>
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={handleCancelMatchmaking}
+                  className="bg-red-500 text-white px-6 py-4 rounded-lg font-semibold text-lg transition-colors"
+                >
+                  Cancel
+                </motion.button>
+              </div>
+            )}
             
             <motion.button
               whileHover={{ scale: 1.05 }}
