@@ -22,7 +22,7 @@ import {
 } from "@mui/material";
 
 // Assuming your Socket.io server is running on the same host
-const socket = io('wss://chessapp-rpmo.onrender.com');
+const socket = io('ws://localhost:5000');
 
 // Custom Dialog Component
 
@@ -109,8 +109,9 @@ const Game = () => {
       if (chess.isCheckmate()) {
         setOver(`${moveData.opponent} wins!`);
         alert("Game over!");
-        navigate("/")
+        navigate("/home")
       }
+      
       console.log(over)
     });
 
@@ -215,11 +216,12 @@ const Game = () => {
       move,
       room: gameState.roomId,
     });
-     if (chess.isCheckmate()) {
-        setOver(`You wins!`);
-        alert("Game over!");
-        navigate("/")
-      }
+    if (chess.isCheckmate()) {
+      setOver(`you wins!`);
+      alert("Game over! you win");
+      navigate("/home")
+    }
+
     return true;
   }
 
