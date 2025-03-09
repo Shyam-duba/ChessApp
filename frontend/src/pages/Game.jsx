@@ -111,9 +111,6 @@ const Game = () => {
         alert("Game over!");
         navigate("/")
       }
-      else{
-        alert("Game continue!");
-      }
       console.log(over)
     });
 
@@ -218,7 +215,11 @@ const Game = () => {
       move,
       room: gameState.roomId,
     });
-
+     if (chess.isCheckmate()) {
+        setOver(`${moveData.opponent} wins!`);
+        alert("Game over!");
+        navigate("/")
+      }
     return true;
   }
 
