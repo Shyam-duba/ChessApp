@@ -22,7 +22,7 @@ import {
 } from "@mui/material";
 
 // Assuming your Socket.io server is running on the same host
-const socket = io('http://localhost:5000');
+const socket = io('wss://chessapp-rpmo.onrender.com');
 
 // Custom Dialog Component
 
