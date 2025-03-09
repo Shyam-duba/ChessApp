@@ -41,7 +41,7 @@ function Signup() {
     };
 
     try {
-      const response = await axios.post("http://localhost:5000/api/auth/signup", user);
+      const response = await axios.post("https://chessapp-rpmo.onrender.com/api/auth/signup", user);
       if (response.status === 201) {
         navigate("/login");
       }
