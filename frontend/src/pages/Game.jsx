@@ -109,7 +109,7 @@ const Game = () => {
       if (chess.isCheckmate()) {
         setOver(`${moveData.opponent} wins!`);
         alert("Game over!");
-        navigate("/home")
+        navigate("/")
       }
       else{
         alert("Game continue!");
