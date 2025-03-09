@@ -216,7 +216,7 @@ const Game = () => {
       room: gameState.roomId,
     });
      if (chess.isCheckmate()) {
-        setOver(`${moveData.opponent} wins!`);
+        setOver(`You wins!`);
         alert("Game over!");
         navigate("/")
       }
