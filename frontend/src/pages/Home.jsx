@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 import { Check as ChessKing, User, LogOut, Trophy, Settings } from 'lucide-react';
 import { io } from 'socket.io-client';
 
-const socket = io("ws://localhost:5000", {
+const socket = io("wss://chessapp-rpmo.onrender.com", {
   autoConnect: true,
   transports: ['websocket']
 });
